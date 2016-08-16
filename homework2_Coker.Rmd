@@ -1,0 +1,160 @@
+---
+title: "Homework 2 - Coker"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dichromat)
+library(arules)
+library(grid)
+library(ggplot2)
+library(tm)
+library(caret)
+library(klaR)
+library(e1071)
+library(class)
+library(kknn)
+```
+
+## Flights at ABIA
+
+```{r echo = FALSE}
+ABIA = read.csv("https://raw.githubusercontent.com/jgscott/STA380/master/data/ABIA.csv")
+
+qplot(LateAircraftDelay, Origin, data = ABIA, color = Origin)
+```
+
+This figure plots the Late Aircraft Delay against the Origin, color coded based on the origin. Certain airports have very low instances of delay such as TYS, SAT, OAK, MSP, and BHM. Whereas other airpots have much higher instances of delay including ORD, MDW, IAH, JFK, IAH, HOU, DFW, DEN, and DAL.
+
+## Author attribution
+
+```{r echo = FALSE}
+
+readerPlain = function(fname){
+  readPlain(elem=list(content=readLines(fname)), id=fname, language='en') }
+
+
+## Rolling two directories together into a 
+author_dirs = Sys.glob('../data/ReutersC50/C50train/*')
+file_list = NULL
+labels = NULL
+for(author in author_dirs) {
+	author_name = substring(author, first=29)
+	files_to_add = Sys.glob(paste0(author, '/*.txt'))
+	file_list = append(file_list, files_to_add)
+	labels = append(labels, rep(author_name, length(files_to_add)))
+}
+
+auth_names = unique(labels)
+
+## Test
+author_dirs_test = Sys.glob('ReutersC50/C50test/*')
+author_dirs_test = author_dirs_test[1:50]
+file_list_test = NULL
+labels_test = NULL
+for(author in author_dirs_test) {
+  author_name = substring(author, first=20)
+  author_name
+  files_to_add_test = Sys.glob(paste0(author, '/*.txt'))
+  file_list_test = append(file_list_test, files_to_add_test)
+  labels_test = append(labels, rep(author_name, length(files_to_add_test)))
+}
+
+auth_names_test = unique(labels_test)
+
+# Need a more clever regex to get better names here
+all_docs = lapply(file_list, readerPlain) 
+names(all_docs) = file_list
+names(all_docs) = sub('.txt', '', names(all_docs))
+
+my_corpus = Corpus(VectorSource(all_docs))
+names(my_corpus) = file_list
+
+all_docs_test = lapply(file_list_test, readerPlain) 
+names(all_docs_test) = file_list_test
+names(all_docs_test) = sub('.txt', '', names(all_docs_test))
+
+my_corpus_test = Corpus(VectorSource(all_docs_test))
+names(my_corpus_test) = file_list_test
+
+# Preprocesng
+my_corpus_test = tm_map(my_corpus_test, content_transformer(tolower)) # make everything lowercase
+my_corpus_test = tm_map(my_corpus_test, content_transformer(removeNumbers)) # remove numbers
+my_corpus_test = tm_map(my_corpus_test, content_transformer(removePunctuation)) # remove punctuation
+my_corpus_test = tm_map(my_corpus_test, content_transformer(stripWhitespace)) ## remove excess white-space
+my_corpus_test = tm_map(my_corpus_test, content_transformer(removeWords), stopwords("SMART"))
+
+DTM = DocumentTermMatrix(my_corpus)
+
+my_corpus = tm_map(my_corpus, content_transformer(tolower)) # make everything lowercase
+my_corpus = tm_map(my_corpus, content_transformer(removeNumbers)) # remove numbers
+my_corpus = tm_map(my_corpus, content_transformer(removePunctuation)) # remove punctuation
+my_corpus = tm_map(my_corpus, content_transformer(stripWhitespace)) ## remove excess white-space
+my_corpus = tm_map(my_corpus, content_transformer(removeWords), stopwords("SMART"))
+
+DTM_test = DocumentTermMatrix(my_corpus_test)
+
+## You can inspect its entries...
+DTM = removeSparseTerms(DTM, 0.9)
+
+DTM_test = removeSparseTerms(DTM_test, 0.9)
+# Now a dense matrix
+X = as.matrix(DTM)
+
+X_test = as.matrix(DTM_test)
+
+# Naive Bayes
+
+model = NaiveBayes(as.factor(auth_names)~., data = as.data.frame(author_dirs))
+model_test = NaiveBayes(as.factor(auth_names_test)~., data = as.data.frame(author_dirs_test))
+predictions = predict(model_test)
+
+correct = lapply(predictions, function(x) x[which.max(x)])
+
+# knn
+knn(train = auth_names, test = auth_names_test, cl = labels_test, k=3)
+```
+
+First, I chose to run a Naive Bayes model for my predictions using the caret and kLaR libraries, which had approximately 95% accuracy. 
+
+Next, I chose was KNN, which had approximately 60% accuracy.
+
+The Naive Bayes Model was better for this attribution set.
+## Practice with association rule mining
+
+```{r echo = FALSE}
+
+grocery = readLines("https://raw.githubusercontent.com/jgscott/STA380/master/data/groceries.txt")
+
+grocery = strsplit(grocery, split=',', fixed=TRUE)
+
+grocerytrans <- as(grocery, "transactions") 
+
+groceryrules <- apriori(grocerytrans, parameter=list(support = 0.001, confidence = 0.3,  maxlen = 4, target = "rules"))
+
+# remove redundant rules
+rules.sorted <- sort(groceryrules)
+subset.matrix <- is.subset(rules.sorted, rules.sorted)
+subset.matrix[lower.tri(subset.matrix, diag=T)] <- NA
+redundant <- colSums(subset.matrix, na.rm=T) >= 1
+
+rules.pruned <- rules.sorted[!redundant]
+
+library(arulesViz)
+
+subrules1 <- head(sort(rules.pruned, by="lift"), 10)
+plot(subrules1, method = "graph", control=list(type="itemsets", arrowSize=1.5), main = "Graph of top 10 rules for Lift")
+subrules2 <- head(sort(rules.pruned, by="confidence"), 10)
+plot(subrules2, method = "graph", control=list(type="itemsets", arrowSize=1.5), main = "Graph of top 10 rules for Confidence")
+```
+
+Support for the association wule mining is set to 0.001, which was chosen to allow for a high number of transactions. When support is set at a much higher fraction, the number of transactions that it specifies becomes very low.
+
+Confidence is set at 0.3, which was chosen again to allow for a high number of patterns to be exposed for inspection.
+
+The two graphs above show the top 10 rules for lift and confidence. 
+
+The graphs show that sugar associated with flour, white bread is associated with processed foods, and hamburgre meat is associated with instant food products. The graphs also show that wholk milk is asscoiated cereals and  soda is associated with beverages.
+
+These dicovered item sets make a lot of sense.
